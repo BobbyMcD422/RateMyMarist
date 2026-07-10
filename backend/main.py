@@ -3,10 +3,10 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.config import settings
 from backend.db import init_db
-from backend.routers import admin, professors, rmp
+from backend.routers import admin, rmp, sections
 
 
-app = FastAPI(title="Professor Catalog API")
+app = FastAPI(title="Course Directory API")
 
 app.add_middleware(
     CORSMiddleware,
@@ -28,6 +28,6 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-app.include_router(professors.router)
+app.include_router(sections.router)
 app.include_router(admin.router)
 app.include_router(rmp.router)

@@ -1,5 +1,5 @@
-import { AlertCircle, DatabaseZap, ExternalLink, RefreshCw, Search, ShieldCheck, Star } from "lucide-react"
-import { FormEvent, useEffect, useMemo, useState } from "react"
+import { AlertCircle, ChevronLeft, ChevronRight, DatabaseZap, ExternalLink, FileJson, RefreshCw, Search, ShieldCheck, Star } from "lucide-react"
+import { useEffect, useMemo, useState } from "react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -13,28 +13,25 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { useDebounce } from "@/hooks/use-debounce"
 import {
-  getProfessors,
+  CourseDirectoryOptions,
+  CourseSection,
+  CourseSectionPage,
+  getCourseDirectoryOptions,
+  getCourseSections,
   getRMPDepartments,
   getRMPProfessors,
   getSavedRMPDepartments,
   getSavedRMPProfessors,
-  Professor,
+  RegistrationSyncResult,
   RMPDepartment,
   RMPProfessor,
   RMPProfessorPage,
   RMPSyncResult,
-  syncCatalog,
   syncRMP,
-  SyncResult,
+  syncRegistrationJson,
 } from "@/lib/api"
 
 type Route = "/" | "/rmp" | "/rmp-saved" | "/admin"
-
-const categoryOptions = [
-  { label: "All", value: "all" },
-  { label: "Faculty", value: "Faculty" },
-  { label: "Emeriti Faculty", value: "Emeriti Faculty" },
-]
 
 function App() {
   const [route, setRoute] = useState<Route>(getRoute())
@@ -55,12 +52,12 @@ function App() {
       <header className="border-b bg-card">
         <div className="mx-auto flex w-full max-w-6xl flex-col gap-3 px-4 py-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <h1 className="text-xl font-semibold tracking-normal">Professor Catalog</h1>
-            <p className="text-sm text-muted-foreground">Marist faculty data with RMP scores coming soon.</p>
+            <h1 className="text-xl font-semibold tracking-normal">Course Directory</h1>
+            <p className="text-sm text-muted-foreground">Marist sections, instructors, and RMP data.</p>
           </div>
           <Tabs value={route} onValueChange={(value) => navigate(value as Route)}>
             <TabsList>
-              <TabsTrigger value="/">Directory</TabsTrigger>
+              <TabsTrigger value="/">Courses</TabsTrigger>
               <TabsTrigger value="/rmp">Live RMP</TabsTrigger>
               <TabsTrigger value="/rmp-saved">Saved RMP</TabsTrigger>
               <TabsTrigger value="/admin">Admin</TabsTrigger>
@@ -77,7 +74,7 @@ function App() {
         ) : route === "/rmp-saved" ? (
           <RMPPage source="saved" />
         ) : (
-          <DirectoryPage />
+          <CourseDirectoryPage />
         )}
       </main>
     </div>
@@ -324,87 +321,125 @@ function RMPTable({ professors, isLoading }: { professors: RMPProfessor[]; isLoa
   )
 }
 
-function DirectoryPage() {
+function CourseDirectoryPage() {
+  const pageSize = 100
   const [query, setQuery] = useState("")
-  const [category, setCategory] = useState("all")
-  const [professors, setProfessors] = useState<Professor[]>([])
+  const [term, setTerm] = useState("")
+  const [subject, setSubject] = useState("all")
+  const [offset, setOffset] = useState(0)
+  const [options, setOptions] = useState<CourseDirectoryOptions>({ terms: [], subjects: [] })
+  const [page, setPage] = useState<CourseSectionPage | null>(null)
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const debouncedQuery = useDebounce(query, 300)
 
   useEffect(() => {
     const controller = new AbortController()
+    getCourseDirectoryOptions(undefined, controller.signal)
+      .then((result) => {
+        setOptions(result)
+        setTerm((current) => current || result.terms[0]?.code || "")
+      })
+      .catch((err: unknown) => {
+        if (!(err instanceof DOMException && err.name === "AbortError")) {
+          setError(err instanceof Error ? err.message : "Unable to load course filters.")
+        }
+      })
+    return () => controller.abort()
+  }, [])
+
+  useEffect(() => {
+    if (!term) return
+    const controller = new AbortController()
+    getCourseDirectoryOptions(term, controller.signal)
+      .then((result) => {
+        setOptions(result)
+        setSubject((current) => (current === "all" || result.subjects.includes(current) ? current : "all"))
+      })
+      .catch((err: unknown) => {
+        if (!(err instanceof DOMException && err.name === "AbortError")) {
+          setError(err instanceof Error ? err.message : "Unable to load course filters.")
+        }
+      })
+    return () => controller.abort()
+  }, [term])
+
+  useEffect(() => {
+    if (!term) {
+      setPage(null)
+      setIsLoading(false)
+      return
+    }
+    const controller = new AbortController()
     setIsLoading(true)
     setError(null)
-
-    getProfessors(
+    getCourseSections(
       {
         q: debouncedQuery.trim() || undefined,
-        category,
-        limit: 100,
-        offset: 0,
+        term,
+        subject,
+        limit: pageSize,
+        offset,
       },
       controller.signal,
     )
-      .then(setProfessors)
+      .then(setPage)
       .catch((err: unknown) => {
-        if (err instanceof DOMException && err.name === "AbortError") {
-          return
+        if (!(err instanceof DOMException && err.name === "AbortError")) {
+          setError(err instanceof Error ? err.message : "Unable to load course sections.")
         }
-        setError(err instanceof Error ? err.message : "Unable to load professors.")
       })
       .finally(() => {
-        if (!controller.signal.aborted) {
-          setIsLoading(false)
-        }
+        if (!controller.signal.aborted) setIsLoading(false)
       })
-
     return () => controller.abort()
-  }, [category, debouncedQuery])
+  }, [debouncedQuery, offset, subject, term])
 
   const resultLabel = useMemo(() => {
-    if (isLoading) {
-      return "Loading"
-    }
-
-    return `${professors.length} ${professors.length === 1 ? "professor" : "professors"}`
-  }, [isLoading, professors.length])
+    if (isLoading) return "Loading"
+    const total = page?.total ?? 0
+    return `${total} ${total === 1 ? "section" : "sections"}`
+  }, [isLoading, page?.total])
 
   return (
     <section className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div className="space-y-1">
-          <h2 className="text-lg font-semibold tracking-normal">Directory</h2>
-          <p className="text-sm text-muted-foreground">Search by professor name or title.</p>
+          <h2 className="text-lg font-semibold tracking-normal">Course Sections</h2>
+          <p className="text-sm text-muted-foreground">Search courses, CRNs, titles, or instructors.</p>
         </div>
-        <Badge variant="muted" className="w-fit">
-          {resultLabel}
-        </Badge>
+        <Badge variant="muted" className="w-fit">{resultLabel}</Badge>
       </div>
 
       <Card>
         <CardHeader className="pb-3">
-          <div className="grid gap-3 md:grid-cols-[1fr_220px]">
+          <div className="grid gap-3 lg:grid-cols-[1fr_180px_220px]">
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
-                aria-label="Search professors"
+                aria-label="Search course sections"
                 className="pl-9"
                 value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search names or titles"
+                onChange={(event) => {
+                  setQuery(event.target.value)
+                  setOffset(0)
+                }}
+                placeholder="Course, CRN, title, or instructor"
               />
             </div>
-            <Select value={category} onValueChange={setCategory}>
-              <SelectTrigger aria-label="Filter by category">
-                <SelectValue />
-              </SelectTrigger>
+            <Select value={term} onValueChange={(value) => { setTerm(value); setOffset(0) }} disabled={options.terms.length === 0}>
+              <SelectTrigger aria-label="Filter by term"><SelectValue placeholder="Term" /></SelectTrigger>
               <SelectContent>
-                {categoryOptions.map((option) => (
-                  <SelectItem key={option.value} value={option.value}>
-                    {option.label}
-                  </SelectItem>
+                {options.terms.map((option) => (
+                  <SelectItem key={option.code} value={option.code}>{option.description} ({option.code})</SelectItem>
                 ))}
+              </SelectContent>
+            </Select>
+            <Select value={subject} onValueChange={(value) => { setSubject(value); setOffset(0) }} disabled={!term}>
+              <SelectTrigger aria-label="Filter by subject"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">All subjects</SelectItem>
+                {options.subjects.map((option) => <SelectItem key={option} value={option}>{option}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
@@ -415,63 +450,74 @@ function DirectoryPage() {
             <div className="p-4">
               <Alert variant="destructive">
                 <AlertCircle className="size-4" />
-                <AlertTitle>Could not load directory</AlertTitle>
+                <AlertTitle>Could not load course directory</AlertTitle>
                 <AlertDescription>{error}</AlertDescription>
               </Alert>
             </div>
           ) : (
-            <ProfessorTable professors={professors} isLoading={isLoading} />
+            <CourseSectionTable sections={page?.sections ?? []} isLoading={isLoading} />
           )}
         </CardContent>
       </Card>
+
+      {(page?.total ?? 0) > pageSize ? (
+        <div className="flex items-center justify-between gap-3">
+          <p className="text-sm text-muted-foreground">
+            Showing {offset + 1}-{Math.min(offset + pageSize, page?.total ?? 0)} of {page?.total ?? 0}
+          </p>
+          <div className="flex gap-2">
+            <Button variant="outline" size="icon" disabled={offset === 0 || isLoading} onClick={() => setOffset(Math.max(0, offset - pageSize))} title="Previous page" aria-label="Previous page">
+              <ChevronLeft />
+            </Button>
+            <Button variant="outline" size="icon" disabled={offset + pageSize >= (page?.total ?? 0) || isLoading} onClick={() => setOffset(offset + pageSize)} title="Next page" aria-label="Next page">
+              <ChevronRight />
+            </Button>
+          </div>
+        </div>
+      ) : null}
     </section>
   )
 }
 
-function ProfessorTable({ professors, isLoading }: { professors: Professor[]; isLoading: boolean }) {
+function CourseSectionTable({ sections, isLoading }: { sections: CourseSection[]; isLoading: boolean }) {
   if (isLoading) {
-    return (
-      <div className="space-y-2 p-4">
-        {Array.from({ length: 8 }).map((_, index) => (
-          <Skeleton key={index} className="h-10 w-full" />
-        ))}
-      </div>
-    )
+    return <div className="space-y-2 p-4">{Array.from({ length: 8 }).map((_, index) => <Skeleton key={index} className="h-12 w-full" />)}</div>
   }
-
-  if (professors.length === 0) {
-    return (
-      <div className="flex min-h-48 items-center justify-center px-4 py-10 text-center text-sm text-muted-foreground">
-        No professors match the current filters.
-      </div>
-    )
+  if (sections.length === 0) {
+    return <div className="flex min-h-48 items-center justify-center px-4 py-10 text-center text-sm text-muted-foreground">No course sections match the current filters. Run a registration sync from Admin if the directory is empty.</div>
   }
-
   return (
     <Table>
       <TableHeader>
         <TableRow>
-          <TableHead className="min-w-[190px]">Name</TableHead>
-          <TableHead className="min-w-[280px]">Title</TableHead>
-          <TableHead className="w-[150px]">Category</TableHead>
-          <TableHead className="w-[120px]">RMP Score</TableHead>
+          <TableHead className="w-[130px]">Course</TableHead>
+          <TableHead className="w-[100px]">CRN</TableHead>
+          <TableHead className="min-w-[240px]">Title</TableHead>
+          <TableHead className="min-w-[220px]">Instructors</TableHead>
+          <TableHead className="w-[110px]">Enrolled</TableHead>
+          <TableHead className="w-[100px]">Seats</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
-        {professors.map((professor) => (
-          <TableRow key={professor.id}>
-            <TableCell className="font-medium">{professor.name}</TableCell>
-            <TableCell className="text-muted-foreground">{professor.title ?? "Unknown"}</TableCell>
+        {sections.map((section) => (
+          <TableRow key={section.id}>
+            <TableCell className="font-medium">{section.subject} {section.course_number}</TableCell>
+            <TableCell className="text-muted-foreground">{section.crn}</TableCell>
+            <TableCell>{section.title}</TableCell>
             <TableCell>
-              <Badge variant={professor.category === "Emeriti Faculty" ? "outline" : "secondary"}>{professor.category}</Badge>
+              {section.instructors.length ? (
+                <div className="space-y-1">
+                  {section.instructors.map((instructor) => (
+                    <div key={instructor.id} className="flex items-center gap-2">
+                      <span>{instructor.display_name}</span>
+                      {instructor.primary_indicator ? <Badge variant="outline">Primary</Badge> : null}
+                    </div>
+                  ))}
+                </div>
+              ) : <span className="text-muted-foreground">TBA</span>}
             </TableCell>
-            <TableCell>
-              {professor.rmp_score ? (
-                <Badge>{professor.rmp_score}</Badge>
-              ) : (
-                <span className="text-sm text-muted-foreground">Not added</span>
-              )}
-            </TableCell>
+            <TableCell>{section.enrollment ?? "N/A"}</TableCell>
+            <TableCell>{section.seats_available ?? "N/A"}</TableCell>
           </TableRow>
         ))}
       </TableBody>
@@ -481,29 +527,12 @@ function ProfessorTable({ professors, isLoading }: { professors: Professor[]; is
 
 function AdminPage() {
   const [adminToken, setAdminToken] = useState(() => sessionStorage.getItem("admin-token") ?? "")
-  const [isSyncing, setIsSyncing] = useState(false)
-  const [result, setResult] = useState<SyncResult | null>(null)
-  const [error, setError] = useState<string | null>(null)
   const [isSyncingRMP, setIsSyncingRMP] = useState(false)
   const [rmpResult, setRmpResult] = useState<RMPSyncResult | null>(null)
   const [rmpError, setRmpError] = useState<string | null>(null)
-
-  async function onSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    setIsSyncing(true)
-    setError(null)
-    setResult(null)
-    sessionStorage.setItem("admin-token", adminToken)
-
-    try {
-      const syncResult = await syncCatalog(adminToken)
-      setResult(syncResult)
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Sync failed.")
-    } finally {
-      setIsSyncing(false)
-    }
-  }
+  const [isSyncingRegistration, setIsSyncingRegistration] = useState(false)
+  const [registrationResult, setRegistrationResult] = useState<RegistrationSyncResult | null>(null)
+  const [registrationError, setRegistrationError] = useState<string | null>(null)
 
   async function onRMPSync() {
     setIsSyncingRMP(true)
@@ -520,11 +549,26 @@ function AdminPage() {
     }
   }
 
+  async function onRegistrationSync() {
+    setIsSyncingRegistration(true)
+    setRegistrationError(null)
+    setRegistrationResult(null)
+    sessionStorage.setItem("admin-token", adminToken)
+
+    try {
+      setRegistrationResult(await syncRegistrationJson(adminToken))
+    } catch (err) {
+      setRegistrationError(err instanceof Error ? err.message : "Registration JSON sync failed.")
+    } finally {
+      setIsSyncingRegistration(false)
+    }
+  }
+
   return (
     <section className="mx-auto max-w-2xl space-y-4">
       <div className="space-y-1">
         <h2 className="text-lg font-semibold tracking-normal">Admin Sync</h2>
-        <p className="text-sm text-muted-foreground">Refresh the local database from the Marist catalog.</p>
+        <p className="text-sm text-muted-foreground">Refresh registration and RateMyProfessors data.</p>
       </div>
 
       <Card>
@@ -534,13 +578,13 @@ function AdminPage() {
               <ShieldCheck className="size-4" />
             </div>
             <div>
-              <CardTitle>Catalog refresh</CardTitle>
-              <CardDescription>Enter the local admin token and run a sync when catalog data changes.</CardDescription>
+              <CardTitle>Data refresh</CardTitle>
+              <CardDescription>Enter the local admin token, then choose the data source to synchronize.</CardDescription>
             </div>
           </div>
         </CardHeader>
         <CardContent>
-          <form className="space-y-4" onSubmit={onSubmit}>
+          <div className="space-y-4">
             <Input
               aria-label="Admin token"
               type="password"
@@ -549,39 +593,22 @@ function AdminPage() {
               placeholder="Admin token"
               autoComplete="off"
             />
-            <Button type="submit" disabled={isSyncing || adminToken.trim().length === 0}>
-              {isSyncing ? <RefreshCw className="animate-spin" /> : <DatabaseZap />}
-              {isSyncing ? "Syncing" : "Sync catalog"}
-            </Button>
             <Button type="button" variant="outline" disabled={isSyncingRMP || adminToken.trim().length === 0} onClick={onRMPSync}>
               {isSyncingRMP ? <RefreshCw className="animate-spin" /> : <DatabaseZap />}
               {isSyncingRMP ? "Saving RMP snapshot" : "Sync RMP snapshot"}
             </Button>
-          </form>
+            <Button
+              type="button"
+              variant="outline"
+              disabled={isSyncingRegistration || adminToken.trim().length === 0}
+              onClick={onRegistrationSync}
+            >
+              {isSyncingRegistration ? <RefreshCw className="animate-spin" /> : <FileJson />}
+              {isSyncingRegistration ? "Fetching and syncing registration" : "Fetch and sync registration"}
+            </Button>
+          </div>
         </CardContent>
       </Card>
-
-      {error ? (
-        <Alert variant="destructive">
-          <AlertCircle className="size-4" />
-          <AlertTitle>Sync failed</AlertTitle>
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      ) : null}
-
-      {result ? (
-        <Alert variant="success">
-          <AlertTitle>Sync complete</AlertTitle>
-          <AlertDescription>
-            <div className="grid gap-2 pt-1 sm:grid-cols-4">
-              <SyncMetric label="Fetched" value={result.fetched} />
-              <SyncMetric label="Inserted" value={result.inserted} />
-              <SyncMetric label="Updated" value={result.updated} />
-              <SyncMetric label="Skipped" value={result.skipped} />
-            </div>
-          </AlertDescription>
-        </Alert>
-      ) : null}
 
       {rmpError ? (
         <Alert variant="destructive">
@@ -602,6 +629,34 @@ function AdminPage() {
               <SyncMetric label="Unchanged" value={rmpResult.unchanged} />
               <SyncMetric label="Deleted" value={rmpResult.deleted} />
             </div>
+          </AlertDescription>
+        </Alert>
+      ) : null}
+
+      {registrationError ? (
+        <Alert variant="destructive">
+          <AlertCircle className="size-4" />
+          <AlertTitle>Registration sync failed</AlertTitle>
+          <AlertDescription>{registrationError}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      {registrationResult ? (
+        <Alert variant="success">
+          <AlertTitle>Registration JSON synced for {registrationResult.term_description} ({registrationResult.term})</AlertTitle>
+          <AlertDescription>
+            <div className="grid gap-2 pt-1 sm:grid-cols-5">
+              <SyncMetric label="Fetched" value={registrationResult.fetched} />
+              <SyncMetric label="Inserted" value={registrationResult.sections_inserted} />
+              <SyncMetric label="Updated" value={registrationResult.sections_updated} />
+              <SyncMetric label="Unchanged" value={registrationResult.sections_unchanged} />
+              <SyncMetric label="Inactive" value={registrationResult.sections_deactivated} />
+            </div>
+            <p className="pt-3 text-xs text-emerald-800">
+              Courses: +{registrationResult.courses_inserted} / {registrationResult.courses_updated} updated. Instructors: +
+              {registrationResult.instructors_inserted} / {registrationResult.instructors_updated} updated. Teaching links: +
+              {registrationResult.links_inserted} / {registrationResult.links_updated} updated / {registrationResult.links_deleted} removed.
+            </p>
           </AlertDescription>
         </Alert>
       ) : null}

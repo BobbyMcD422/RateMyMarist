@@ -1,6 +1,6 @@
-# Professor Catalog API
+# Course Directory API
 
-FastAPI backend for scraping the Marist faculty catalog into Postgres and serving professor data to a frontend.
+FastAPI and React application for synchronizing Marist registration sections and RateMyProfessors data into Postgres.
 
 ## Setup
 
@@ -27,21 +27,21 @@ FastAPI backend for scraping the Marist faculty catalog into Postgres and servin
 4. Run the API:
 
    ```powershell
-   uvicorn app.main:app --reload
+   uvicorn backend.main:app --reload
    ```
 
-5. Sync the catalog:
+5. Sync registration data from the Admin page or API:
 
    ```powershell
    Invoke-RestMethod -Method Post `
-     -Uri http://127.0.0.1:8000/admin/sync-catalog `
+     -Uri http://127.0.0.1:8000/admin/sync-registration `
      -Headers @{ "X-Admin-Token" = "change-me" }
    ```
 
 6. Browse:
 
    - API docs: <http://127.0.0.1:8000/docs>
-   - Professors: <http://127.0.0.1:8000/professors>
+   - Course sections: <http://127.0.0.1:8000/sections>
 
 ## Docker
 
@@ -52,26 +52,6 @@ docker compose up --build
 ```
 
 The backend container listens on <http://127.0.0.1:8000>. Inside Docker, it connects to Postgres at `db:5432`; from the host, Postgres is still available on `127.0.0.1:5433`.
-
-### Catalog WAF fallback
-
-The live catalog URL can return an AWS WAF JavaScript challenge to backend HTTP clients. When that happens, save the Faculty catalog page HTML from a browser into `data/faculty.html`, then set this in `.env`:
-
-```powershell
-CATALOG_HTML_PATH=/app/data/faculty.html
-```
-
-Restart the backend:
-
-```powershell
-docker compose up -d --build backend
-```
-
-The admin sync endpoint will then parse the saved HTML snapshot instead of fetching the WAF-blocked live URL.
-
-## Data Source
-
-The Marist catalog page is server-rendered HTML. Each professor entry is parsed from a paragraph with a `<strong>` name/year line and an `<em>` title line. The scraper stores name, title, category, source URL, and sync timestamps.
 
 ## Frontend
 
@@ -84,7 +64,7 @@ npm install
 npm run dev
 ```
 
-Open <http://localhost:5173> for the professor directory. The admin sync page is at <http://localhost:5173/admin> and uses the backend `ADMIN_API_KEY` as `X-Admin-Token`.
+Open <http://localhost:5173> for the course section directory. The admin sync page is at <http://localhost:5173/admin> and uses the backend `ADMIN_API_KEY` as `X-Admin-Token`.
 
 The RateMyProfessors exploration page is at <http://localhost:5173/rmp>. It calls:
 
@@ -93,6 +73,34 @@ GET /rmp/professors?school_id=563&page_size=20&q=
 ```
 
 `563` is the RateMyProfessors school ID for Marist College.
+
+## Registration JSON Sync
+
+Configure the request without editing the endpoint URL:
+
+```env
+MYMARIST_TERM=202640
+MYMARIST_UNIQUE_SESSION_ID=your-current-session-id
+MYMARIST_PAGE_MAX_SIZE=2339
+```
+
+Set `MYMARIST_PAGE_MAX_SIZE` high enough to return every section. The Admin page's **Fetch and sync registration** button now downloads a fresh snapshot and applies the database sync in one action.
+
+The standalone probe remains available for request debugging:
+
+```powershell
+docker compose run --rm --no-deps backend python -m backend.probe_mymarist_request
+```
+
+Confirm the resulting `registration_latest.json` has a `data` length equal to `totalCount`. Partial and empty snapshots are rejected before any database writes. Import the complete snapshot from the Admin page or call:
+
+```powershell
+Invoke-RestMethod -Method Post `
+  -Uri http://127.0.0.1:8000/admin/sync-registration `
+  -Headers @{ "X-Admin-Token" = "your-admin-token" }
+```
+
+The sync upserts courses, instructors, sections, and section-instructor links. Unchanged sections are detected by content hash, and sections missing from a later complete snapshot are marked inactive rather than deleted.
 
 ## Troubleshooting
 

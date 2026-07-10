@@ -1,28 +1,45 @@
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://127.0.0.1:8000"
 
-export type Professor = {
+export type SectionInstructor = {
   id: number
-  name: string
-  title: string | null
-  category: string
-  rmp_score: string | null
-  rmp_url: string | null
-  updated_at: string
-  last_catalog_sync_at: string | null
+  banner_id: string
+  display_name: string
+  email: string | null
+  primary_indicator: boolean | null
 }
 
-export type ProfessorQuery = {
+export type CourseSection = {
+  id: number
+  term: string
+  crn: string
+  course_id: number
+  subject: string
+  course_number: string
+  course_title: string
+  title: string
+  enrollment: number | null
+  seats_available: number | null
+  instructors: SectionInstructor[]
+}
+
+export type CourseSectionPage = {
+  total: number
+  limit: number
+  offset: number
+  sections: CourseSection[]
+}
+
+export type CourseDirectoryOptions = {
+  terms: Array<{ code: string; description: string }>
+  subjects: string[]
+}
+
+export type CourseSectionQuery = {
   q?: string
-  category?: string
+  term?: string
+  subject?: string
   limit?: number
   offset?: number
-}
-
-export type SyncResult = {
-  fetched: number
-  inserted: number
-  updated: number
-  skipped: number
 }
 
 export type RMPProfessor = {
@@ -60,6 +77,26 @@ export type RMPSyncResult = {
   synced_at: string
 }
 
+export type RegistrationSyncResult = {
+  term: string
+  term_description: string
+  source_path: string
+  fetched: number
+  courses_inserted: number
+  courses_updated: number
+  instructors_inserted: number
+  instructors_updated: number
+  sections_inserted: number
+  sections_updated: number
+  sections_unchanged: number
+  sections_deactivated: number
+  links_inserted: number
+  links_updated: number
+  links_deleted: number
+  links_skipped: number
+  synced_at: string
+}
+
 async function parseResponse<T>(response: Response): Promise<T> {
   if (response.ok) {
     return response.json() as Promise<T>
@@ -78,32 +115,31 @@ async function parseResponse<T>(response: Response): Promise<T> {
   throw new Error(message)
 }
 
-export async function getProfessors(query: ProfessorQuery = {}, signal?: AbortSignal): Promise<Professor[]> {
+export async function getCourseSections(
+  query: CourseSectionQuery = {},
+  signal?: AbortSignal,
+): Promise<CourseSectionPage> {
   const params = new URLSearchParams()
   params.set("limit", String(query.limit ?? 100))
   params.set("offset", String(query.offset ?? 0))
 
-  if (query.q) {
-    params.set("q", query.q)
-  }
+  if (query.q) params.set("q", query.q)
+  if (query.term) params.set("term", query.term)
+  if (query.subject && query.subject !== "all") params.set("subject", query.subject)
 
-  if (query.category && query.category !== "all") {
-    params.set("category", query.category)
-  }
-
-  const response = await fetch(`${API_BASE_URL}/professors?${params.toString()}`, { signal })
-  return parseResponse<Professor[]>(response)
+  const response = await fetch(`${API_BASE_URL}/sections?${params.toString()}`, { signal })
+  return parseResponse<CourseSectionPage>(response)
 }
 
-export async function syncCatalog(adminToken: string): Promise<SyncResult> {
-  const response = await fetch(`${API_BASE_URL}/admin/sync-catalog`, {
-    method: "POST",
-    headers: {
-      "X-Admin-Token": adminToken,
-    },
-  })
+export async function getCourseDirectoryOptions(
+  term?: string,
+  signal?: AbortSignal,
+): Promise<CourseDirectoryOptions> {
+  const params = new URLSearchParams()
+  if (term) params.set("term", term)
 
-  return parseResponse<SyncResult>(response)
+  const response = await fetch(`${API_BASE_URL}/sections/options?${params.toString()}`, { signal })
+  return parseResponse<CourseDirectoryOptions>(response)
 }
 
 export async function getRMPProfessors(
@@ -166,4 +202,12 @@ export async function syncRMP(adminToken: string): Promise<RMPSyncResult> {
     headers: { "X-Admin-Token": adminToken },
   })
   return parseResponse<RMPSyncResult>(response)
+}
+
+export async function syncRegistrationJson(adminToken: string): Promise<RegistrationSyncResult> {
+  const response = await fetch(`${API_BASE_URL}/admin/sync-registration`, {
+    method: "POST",
+    headers: { "X-Admin-Token": adminToken },
+  })
+  return parseResponse<RegistrationSyncResult>(response)
 }

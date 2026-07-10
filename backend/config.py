@@ -28,9 +28,8 @@ def get_cors_origins() -> list[str]:
 class Settings:
     database_url: str
     admin_api_key: str
-    catalog_url: str
-    catalog_html_path: str | None
     rmp_school_id: int
+    registration_json_path: str
     cors_origins: list[str]
 
     def masked_database_url(self) -> str:
@@ -46,8 +45,10 @@ class Settings:
 settings = Settings(
     database_url=os.getenv("DATABASE_URL", "postgresql+psycopg://postgres:postgres@127.0.0.1:5433/professors"),
     admin_api_key=os.getenv("ADMIN_API_KEY", "change-me"),
-    catalog_url=os.getenv("CATALOG_URL", "https://catalog.marist.edu/content.php?catoid=10&navoid=440"),
-    catalog_html_path=os.getenv("CATALOG_HTML_PATH"),
     rmp_school_id=int(os.getenv("RMP_SCHOOL_ID", "563")),
+    registration_json_path=os.getenv(
+        "MYMARIST_REGISTRATION_JSON_PATH",
+        "/app/logs/responses/registration_latest.json",
+    ),
     cors_origins=get_cors_origins(),
 )

@@ -32,3 +32,14 @@ def init_db() -> None:
             connection.execute(
                 text("ALTER TABLE rmp_professor_snapshots ADD COLUMN profile_url VARCHAR(500)")
             )
+
+    section_columns = {column["name"] for column in inspect(engine).get_columns("sections")}
+    section_migrations = {
+        "content_hash": "ALTER TABLE sections ADD COLUMN content_hash VARCHAR(64)",
+        "is_active": "ALTER TABLE sections ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT TRUE",
+        "last_synced_at": "ALTER TABLE sections ADD COLUMN last_synced_at TIMESTAMP WITH TIME ZONE",
+    }
+    with engine.begin() as connection:
+        for column_name, statement in section_migrations.items():
+            if column_name not in section_columns:
+                connection.execute(text(statement))

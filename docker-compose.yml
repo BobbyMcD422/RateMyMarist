@@ -20,8 +20,6 @@ services:
     environment:
       DATABASE_URL: postgresql+psycopg://postgres:postgres@db:5432/professors
       ADMIN_API_KEY: ${ADMIN_API_KEY:-postgres}
-      CATALOG_URL: ${CATALOG_URL:-https://catalog.marist.edu/content.php?catoid=10&navoid=440}
-      CATALOG_HTML_PATH: ${CATALOG_HTML_PATH:-}
       RMP_SCHOOL_ID: ${RMP_SCHOOL_ID:-563}
       CORS_ORIGINS: ${CORS_ORIGINS:-["http://localhost:5173","http://127.0.0.1:5173"]}
     ports:

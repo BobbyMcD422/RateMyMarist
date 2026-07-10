@@ -2,11 +2,13 @@
 
 import json
 import os
+import re
 import sys
 from contextlib import redirect_stderr, redirect_stdout
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 import httpx
 from dotenv import load_dotenv
@@ -44,6 +46,50 @@ def get_bool_env(name: str, default: bool = False) -> bool:
     return value.strip().lower() in {"1", "true", "yes", "on"}
 
 
+def get_positive_int_env(name: str) -> int:
+    value = get_required_env(name)
+    try:
+        parsed = int(value)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer.") from exc
+    if parsed <= 0:
+        raise ValueError(f"{name} must be greater than zero.")
+    return parsed
+
+
+def build_registration_request(url: str) -> tuple[str, dict[str, Any]]:
+    parsed_url = urlsplit(url)
+    clean_url = urlunsplit((parsed_url.scheme, parsed_url.netloc, parsed_url.path, "", parsed_url.fragment))
+    query: dict[str, Any] = {
+        "startDatepicker": "",
+        "endDatepicker": "",
+        "pageOffset": 0,
+        "sortColumn": "subjectDescription",
+        "sortDirection": "asc",
+    }
+    query.update(dict(parse_qsl(parsed_url.query, keep_blank_values=True)))
+    query.update(get_json_object("MYMARIST_QUERY"))
+    query.update(
+        {
+            "txt_term": get_required_env("MYMARIST_TERM"),
+            "uniqueSessionId": get_required_env("MYMARIST_UNIQUE_SESSION_ID"),
+            "pageMaxSize": get_positive_int_env("MYMARIST_PAGE_MAX_SIZE"),
+        }
+    )
+    return clean_url, query
+
+
+def redact_request_url(url: object) -> str:
+    parsed_url = urlsplit(str(url))
+    query = [
+        (name, "<redacted>" if name == "uniqueSessionId" else value)
+        for name, value in parse_qsl(parsed_url.query, keep_blank_values=True)
+    ]
+    return urlunsplit(
+        (parsed_url.scheme, parsed_url.netloc, parsed_url.path, urlencode(query), parsed_url.fragment)
+    )
+
+
 def build_headers(cookie: str) -> dict[str, str]:
     headers = {
         "Accept": "application/json, text/plain, */*",
@@ -71,10 +117,51 @@ def looks_like_login_page(response: httpx.Response) -> bool:
     return any(marker in preview for marker in ("sign in", "log in", "login", "single sign-on", "sso"))
 
 
-def save_response(response: httpx.Response, response_dir: Path, started_at: datetime) -> Path:
+def slugify(value: object) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", str(value).strip().lower()).strip("-")
+    return slug[:80]
+
+
+def get_term_labels(
+    parsed_json: object,
+    query: dict[str, Any],
+    json_body: dict[str, Any],
+) -> tuple[str | None, str | None]:
+    sources: list[dict[str, Any]] = [query, json_body]
+    if isinstance(parsed_json, dict):
+        sources.append(parsed_json)
+        for collection_name in ("data", "results", "sections", "items"):
+            collection = parsed_json.get(collection_name)
+            if isinstance(collection, list) and collection and isinstance(collection[0], dict):
+                sources.append(collection[0])
+
+    term_code = None
+    term_description = None
+    for source in sources:
+        term_code = term_code or source.get("term") or source.get("termCode") or source.get("txt_term")
+        term_description = (
+            term_description
+            or source.get("termDesc")
+            or source.get("termDescription")
+        )
+
+    return (
+        slugify(term_code) if term_code else None,
+        slugify(term_description) if term_description else None,
+    )
+
+
+def save_response(
+    response: httpx.Response,
+    response_dir: Path,
+    started_at: datetime,
+    query: dict[str, Any],
+    json_body: dict[str, Any],
+) -> Path:
     response_dir.mkdir(parents=True, exist_ok=True)
     timestamp = started_at.strftime("%Y%m%dT%H%M%S.%fZ")
     content_type = response.headers.get("content-type", "").lower()
+    response_prefix = slugify(os.getenv("MYMARIST_RESPONSE_PREFIX", "registration")) or "registration"
 
     is_json = False
     try:
@@ -93,21 +180,28 @@ def save_response(response: httpx.Response, response_dir: Path, started_at: date
         extension = "txt"
         content = response.text
 
-    response_path = response_dir / f"{timestamp}_status-{response.status_code}.{extension}"
+    term_code, term_description = get_term_labels(parsed_json, query, json_body)
+    name_parts = [response_prefix]
+    if term_description:
+        name_parts.append(term_description)
+    if term_code:
+        name_parts.append(term_code)
+    name_parts.extend((timestamp, f"status-{response.status_code}"))
+
+    response_path = response_dir / f"{'_'.join(name_parts)}.{extension}"
     response_path.write_text(content, encoding="utf-8")
 
     if extension == "json" and response.is_success:
-        (response_dir / "latest.json").write_text(content, encoding="utf-8")
+        (response_dir / f"{response_prefix}_latest.json").write_text(content, encoding="utf-8")
 
     return response_path
 
 
 def run_probe(response_dir: Path, started_at: datetime) -> int:
     try:
-        url = get_required_env("MYMARIST_REGISTRATION_URL")
+        url, query = build_registration_request(get_required_env("MYMARIST_REGISTRATION_URL"))
         cookie = get_required_env("MYMARIST_COOKIE")
         method = os.getenv("MYMARIST_METHOD", "GET").strip().upper()
-        query = get_json_object("MYMARIST_QUERY")
         json_body = get_json_object("MYMARIST_JSON_BODY")
         headers = build_headers(cookie)
     except ValueError as exc:
@@ -145,7 +239,7 @@ def run_probe(response_dir: Path, started_at: datetime) -> int:
 
     print(f"Status: {response.status_code}")
     print(f"Content-Type: {response.headers.get('content-type', 'not provided')}")
-    print(f"Final URL: {response.url}")
+    print(f"Final URL: {redact_request_url(response.url)}")
 
     if response.is_redirect:
         print(f"Redirect target: {response.headers.get('location', 'not provided')}")
@@ -154,7 +248,7 @@ def run_probe(response_dir: Path, started_at: datetime) -> int:
         print("Warning: the response appears to be an HTML login page.")
 
     try:
-        response_path = save_response(response, response_dir, started_at)
+        response_path = save_response(response, response_dir, started_at, query, json_body)
     except OSError as exc:
         print(f"Could not save response body: {exc}", file=sys.stderr)
         return 1
