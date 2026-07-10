@@ -49,6 +49,16 @@ export type RMPDepartment = {
   count: number
 }
 
+export type RMPSyncResult = {
+  school_id: number
+  fetched: number
+  inserted: number
+  updated: number
+  unchanged: number
+  deleted: number
+  synced_at: string
+}
+
 async function parseResponse<T>(response: Response): Promise<T> {
   if (response.ok) {
     return response.json() as Promise<T>
@@ -125,4 +135,34 @@ export async function getRMPDepartments(schoolId = 563, signal?: AbortSignal): P
 
   const response = await fetch(`${API_BASE_URL}/rmp/departments?${params.toString()}`, { signal })
   return parseResponse<RMPDepartment[]>(response)
+}
+
+export async function getSavedRMPProfessors(
+  query: { schoolId?: number; q?: string; department?: string; limit?: number; offset?: number } = {},
+  signal?: AbortSignal,
+): Promise<RMPProfessorPage> {
+  const params = new URLSearchParams()
+  params.set("school_id", String(query.schoolId ?? 563))
+  params.set("limit", String(query.limit ?? 100))
+  params.set("offset", String(query.offset ?? 0))
+
+  if (query.q) params.set("q", query.q)
+  if (query.department) params.set("department", query.department)
+
+  const response = await fetch(`${API_BASE_URL}/rmp/saved/professors?${params.toString()}`, { signal })
+  return parseResponse<RMPProfessorPage>(response)
+}
+
+export async function getSavedRMPDepartments(schoolId = 563, signal?: AbortSignal): Promise<RMPDepartment[]> {
+  const params = new URLSearchParams({ school_id: String(schoolId) })
+  const response = await fetch(`${API_BASE_URL}/rmp/saved/departments?${params.toString()}`, { signal })
+  return parseResponse<RMPDepartment[]>(response)
+}
+
+export async function syncRMP(adminToken: string): Promise<RMPSyncResult> {
+  const response = await fetch(`${API_BASE_URL}/admin/sync-rmp`, {
+    method: "POST",
+    headers: { "X-Admin-Token": adminToken },
+  })
+  return parseResponse<RMPSyncResult>(response)
 }

@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 from functools import lru_cache
 
 from rmp_client import HttpError, ParsingError, RMPAPIError, RMPClient, RMPError, RetryError
-from sqlalchemy import delete, func, select
+from sqlalchemy import case, delete, func, select
 from sqlalchemy.orm import Session
 
 from backend.models import RMPProfessorSnapshot
@@ -21,8 +21,8 @@ def _get_all_professors_for_school(school_id: int) -> tuple[RMPProfessorOut, ...
 def _fetch_all_professors_for_school(school_id: int) -> tuple[RMPProfessorOut, ...]:
     try:
         with RMPClient() as client:
-            professors = tuple(
-                RMPProfessorOut(
+            professors_by_id = {
+                professor.id: RMPProfessorOut(
                     id=professor.id,
                     name=professor.name,
                     department=professor.department,
@@ -32,11 +32,11 @@ def _fetch_all_professors_for_school(school_id: int) -> tuple[RMPProfessorOut, .
                     level_of_difficulty=professor.level_of_difficulty,
                 )
                 for professor in client.iter_professors_for_school(school_id)
-            )
+            }
     except (HttpError, ParsingError, RMPAPIError, RetryError, RMPError) as exc:
         raise RMPClientServiceError(str(exc)) from exc
 
-    return professors
+    return tuple(professors_by_id.values())
 
 
 def sync_professors_for_school(db: Session, school_id: int) -> RMPSyncResult:
@@ -136,7 +136,10 @@ def list_saved_professors(
         filters.append(RMPProfessorSnapshot.name.ilike(f"%{query.strip()}%"))
 
     total = db.scalar(select(func.count(RMPProfessorSnapshot.id)).where(*filters)) or 0
-    rating_sort = func.coalesce(RMPProfessorSnapshot.overall_rating, -1)
+    rating_sort = case(
+        (RMPProfessorSnapshot.num_ratings > 0, func.coalesce(RMPProfessorSnapshot.overall_rating, -1)),
+        else_=-1,
+    )
     rows = db.scalars(
         select(RMPProfessorSnapshot)
         .where(*filters)

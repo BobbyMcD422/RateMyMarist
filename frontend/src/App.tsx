@@ -16,15 +16,19 @@ import {
   getProfessors,
   getRMPDepartments,
   getRMPProfessors,
+  getSavedRMPDepartments,
+  getSavedRMPProfessors,
   Professor,
   RMPDepartment,
   RMPProfessor,
   RMPProfessorPage,
+  RMPSyncResult,
   syncCatalog,
+  syncRMP,
   SyncResult,
 } from "@/lib/api"
 
-type Route = "/" | "/rmp" | "/admin"
+type Route = "/" | "/rmp" | "/rmp-saved" | "/admin"
 
 const categoryOptions = [
   { label: "All", value: "all" },
@@ -57,7 +61,8 @@ function App() {
           <Tabs value={route} onValueChange={(value) => navigate(value as Route)}>
             <TabsList>
               <TabsTrigger value="/">Directory</TabsTrigger>
-              <TabsTrigger value="/rmp">RMP</TabsTrigger>
+              <TabsTrigger value="/rmp">Live RMP</TabsTrigger>
+              <TabsTrigger value="/rmp-saved">Saved RMP</TabsTrigger>
               <TabsTrigger value="/admin">Admin</TabsTrigger>
             </TabsList>
           </Tabs>
@@ -65,13 +70,22 @@ function App() {
       </header>
 
       <main className="mx-auto w-full max-w-6xl px-4 py-6">
-        {route === "/admin" ? <AdminPage /> : route === "/rmp" ? <RMPPage /> : <DirectoryPage />}
+        {route === "/admin" ? (
+          <AdminPage />
+        ) : route === "/rmp" ? (
+          <RMPPage source="live" />
+        ) : route === "/rmp-saved" ? (
+          <RMPPage source="saved" />
+        ) : (
+          <DirectoryPage />
+        )}
       </main>
     </div>
   )
 }
 
-function RMPPage() {
+function RMPPage({ source }: { source: "live" | "saved" }) {
+  const isSaved = source === "saved"
   const [query, setQuery] = useState("")
   const [selectedDepartment, setSelectedDepartment] = useState("")
   const [departments, setDepartments] = useState<RMPDepartment[]>([])
@@ -86,7 +100,8 @@ function RMPPage() {
     setIsLoadingDepartments(true)
     setError(null)
 
-    getRMPDepartments(563, controller.signal)
+    const loadDepartments = isSaved ? getSavedRMPDepartments : getRMPDepartments
+    loadDepartments(563, controller.signal)
       .then(setDepartments)
       .catch((err: unknown) => {
         if (err instanceof DOMException && err.name === "AbortError") {
@@ -101,7 +116,7 @@ function RMPPage() {
       })
 
     return () => controller.abort()
-  }, [])
+  }, [isSaved])
 
   useEffect(() => {
     if (!selectedDepartment) {
@@ -114,15 +129,27 @@ function RMPPage() {
     setIsLoadingResults(true)
     setError(null)
 
-    getRMPProfessors(
-      {
-        schoolId: 563,
-        q: debouncedQuery.trim() || undefined,
-        department: selectedDepartment,
-        pageSize: 100,
-      },
-      controller.signal,
-    )
+    const request = isSaved
+      ? getSavedRMPProfessors(
+          {
+            schoolId: 563,
+            q: debouncedQuery.trim() || undefined,
+            department: selectedDepartment,
+            limit: 500,
+          },
+          controller.signal,
+        )
+      : getRMPProfessors(
+          {
+            schoolId: 563,
+            q: debouncedQuery.trim() || undefined,
+            department: selectedDepartment,
+            pageSize: 100,
+          },
+          controller.signal,
+        )
+
+    request
       .then(setPage)
       .catch((err: unknown) => {
         if (err instanceof DOMException && err.name === "AbortError") {
@@ -137,7 +164,7 @@ function RMPPage() {
       })
 
     return () => controller.abort()
-  }, [debouncedQuery, selectedDepartment])
+  }, [debouncedQuery, isSaved, selectedDepartment])
 
   const selectedDepartmentCount = departments.find((department) => department.name === selectedDepartment)?.count ?? 0
   const resultCount = page?.professors.length ?? 0
@@ -146,8 +173,10 @@ function RMPPage() {
     <section className="space-y-4">
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
         <div className="space-y-1">
-          <h2 className="text-lg font-semibold tracking-normal">RateMyProfessors</h2>
-          <p className="text-sm text-muted-foreground">Choose a department, then search those Marist RMP results.</p>
+          <h2 className="text-lg font-semibold tracking-normal">{isSaved ? "Saved RateMyProfessors" : "Live RateMyProfessors"}</h2>
+          <p className="text-sm text-muted-foreground">
+            {isSaved ? "Browse the latest RMP snapshot stored in Postgres." : "Choose a department, then search the live Marist RMP results."}
+          </p>
         </div>
         <Badge variant="muted" className="w-fit">
           {isLoadingDepartments ? "Loading departments" : `${departments.length} departments`}
@@ -197,7 +226,9 @@ function RMPPage() {
 
           {!selectedDepartment && !isLoadingDepartments ? (
             <div className="flex min-h-48 items-center justify-center rounded-md border bg-muted/30 px-4 py-10 text-center text-sm text-muted-foreground">
-              Select a department to load its RateMyProfessors results.
+              {isSaved && departments.length === 0
+                ? "No saved data yet. Run the RMP snapshot sync from the Admin page."
+                : "Select a department to load its RateMyProfessors results."}
             </div>
           ) : null}
 
@@ -438,6 +469,9 @@ function AdminPage() {
   const [isSyncing, setIsSyncing] = useState(false)
   const [result, setResult] = useState<SyncResult | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const [isSyncingRMP, setIsSyncingRMP] = useState(false)
+  const [rmpResult, setRmpResult] = useState<RMPSyncResult | null>(null)
+  const [rmpError, setRmpError] = useState<string | null>(null)
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -453,6 +487,21 @@ function AdminPage() {
       setError(err instanceof Error ? err.message : "Sync failed.")
     } finally {
       setIsSyncing(false)
+    }
+  }
+
+  async function onRMPSync() {
+    setIsSyncingRMP(true)
+    setRmpError(null)
+    setRmpResult(null)
+    sessionStorage.setItem("admin-token", adminToken)
+
+    try {
+      setRmpResult(await syncRMP(adminToken))
+    } catch (err) {
+      setRmpError(err instanceof Error ? err.message : "RMP sync failed.")
+    } finally {
+      setIsSyncingRMP(false)
     }
   }
 
@@ -489,6 +538,10 @@ function AdminPage() {
               {isSyncing ? <RefreshCw className="animate-spin" /> : <DatabaseZap />}
               {isSyncing ? "Syncing" : "Sync catalog"}
             </Button>
+            <Button type="button" variant="outline" disabled={isSyncingRMP || adminToken.trim().length === 0} onClick={onRMPSync}>
+              {isSyncingRMP ? <RefreshCw className="animate-spin" /> : <DatabaseZap />}
+              {isSyncingRMP ? "Saving RMP snapshot" : "Sync RMP snapshot"}
+            </Button>
           </form>
         </CardContent>
       </Card>
@@ -514,6 +567,29 @@ function AdminPage() {
           </AlertDescription>
         </Alert>
       ) : null}
+
+      {rmpError ? (
+        <Alert variant="destructive">
+          <AlertCircle className="size-4" />
+          <AlertTitle>RMP sync failed</AlertTitle>
+          <AlertDescription>{rmpError}</AlertDescription>
+        </Alert>
+      ) : null}
+
+      {rmpResult ? (
+        <Alert variant="success">
+          <AlertTitle>RMP snapshot saved</AlertTitle>
+          <AlertDescription>
+            <div className="grid gap-2 pt-1 sm:grid-cols-5">
+              <SyncMetric label="Fetched" value={rmpResult.fetched} />
+              <SyncMetric label="Inserted" value={rmpResult.inserted} />
+              <SyncMetric label="Updated" value={rmpResult.updated} />
+              <SyncMetric label="Unchanged" value={rmpResult.unchanged} />
+              <SyncMetric label="Deleted" value={rmpResult.deleted} />
+            </div>
+          </AlertDescription>
+        </Alert>
+      ) : null}
     </section>
   )
 }
@@ -534,6 +610,10 @@ function getRoute(): Route {
 
   if (window.location.pathname === "/rmp") {
     return "/rmp"
+  }
+
+  if (window.location.pathname === "/rmp-saved") {
+    return "/rmp-saved"
   }
 
   return "/"
@@ -568,7 +648,7 @@ function formatDifficulty(professor: RMPProfessor): string {
 }
 
 function formatTakeAgain(professor: RMPProfessor): string {
-  if (!hasRatings(professor) || professor.percent_take_again === null || professor.percent_take_again === 0) {
+  if (!hasRatings(professor) || professor.percent_take_again === null || professor.percent_take_again <= 0) {
     return "N/A"
   }
 
