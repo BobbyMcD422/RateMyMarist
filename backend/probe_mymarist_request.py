@@ -71,7 +71,38 @@ def looks_like_login_page(response: httpx.Response) -> bool:
     return any(marker in preview for marker in ("sign in", "log in", "login", "single sign-on", "sso"))
 
 
-def run_probe() -> int:
+def save_response(response: httpx.Response, response_dir: Path, started_at: datetime) -> Path:
+    response_dir.mkdir(parents=True, exist_ok=True)
+    timestamp = started_at.strftime("%Y%m%dT%H%M%S.%fZ")
+    content_type = response.headers.get("content-type", "").lower()
+
+    is_json = False
+    try:
+        parsed_json = response.json()
+        is_json = True
+    except json.JSONDecodeError:
+        parsed_json = None
+
+    if is_json:
+        extension = "json"
+        content = json.dumps(parsed_json, indent=2, ensure_ascii=False) + "\n"
+    elif "text/html" in content_type:
+        extension = "html"
+        content = response.text
+    else:
+        extension = "txt"
+        content = response.text
+
+    response_path = response_dir / f"{timestamp}_status-{response.status_code}.{extension}"
+    response_path.write_text(content, encoding="utf-8")
+
+    if extension == "json" and response.is_success:
+        (response_dir / "latest.json").write_text(content, encoding="utf-8")
+
+    return response_path
+
+
+def run_probe(response_dir: Path, started_at: datetime) -> int:
     try:
         url = get_required_env("MYMARIST_REGISTRATION_URL")
         cookie = get_required_env("MYMARIST_COOKIE")
@@ -79,10 +110,6 @@ def run_probe() -> int:
         query = get_json_object("MYMARIST_QUERY")
         json_body = get_json_object("MYMARIST_JSON_BODY")
         headers = build_headers(cookie)
-        max_chars_value = os.getenv("MYMARIST_BODY_MAX_CHARS", "").strip()
-        body_max_chars = int(max_chars_value) if max_chars_value else None
-        if body_max_chars is not None and body_max_chars <= 0:
-            raise ValueError("MYMARIST_BODY_MAX_CHARS must be greater than zero when set.")
     except ValueError as exc:
         print(f"Configuration error: {exc}", file=sys.stderr)
         return 2
@@ -126,30 +153,29 @@ def run_probe() -> int:
     elif looks_like_login_page(response):
         print("Warning: the response appears to be an HTML login page.")
 
-    if get_bool_env("MYMARIST_SHOW_BODY"):
-        if body_max_chars is not None:
-            print(f"\nResponse body (limited to {body_max_chars} characters):")
-            print(response.text[:body_max_chars])
-            if len(response.text) > body_max_chars:
-                print(f"\n[Response truncated: {len(response.text) - body_max_chars} characters omitted]")
-        else:
-            print(f"\nResponse body ({len(response.text)} characters):")
-            print(response.text)
-    else:
-        print("Response body hidden. Set MYMARIST_SHOW_BODY=true to write it to the log.")
+    try:
+        response_path = save_response(response, response_dir, started_at)
+    except OSError as exc:
+        print(f"Could not save response body: {exc}", file=sys.stderr)
+        return 1
+
+    print(f"Response body: {len(response.content)} bytes")
+    print(f"Response saved to: {response_path}")
 
     return 0 if response.is_success else 1
 
 
 def main() -> int:
     log_path = Path(os.getenv("MYMARIST_LOG_PATH", "logs/mymarist_probe.txt"))
+    response_dir = Path(os.getenv("MYMARIST_RESPONSE_DIR", str(log_path.parent / "responses")))
+    started_at = datetime.now(UTC)
     try:
         log_path.parent.mkdir(parents=True, exist_ok=True)
         with log_path.open("a", encoding="utf-8") as log_file:
             with redirect_stdout(log_file), redirect_stderr(log_file):
                 print("\n" + "=" * 72)
-                print(f"MyMarist probe started at {datetime.now(UTC).isoformat()}")
-                result = run_probe()
+                print(f"MyMarist probe started at {started_at.isoformat()}")
+                result = run_probe(response_dir, started_at)
                 print(f"Probe finished with exit code {result}.")
     except OSError as exc:
         print(f"Could not write probe log {log_path}: {exc}", file=sys.stderr)
