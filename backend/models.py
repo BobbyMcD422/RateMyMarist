@@ -37,6 +37,7 @@ class RMPProfessorSnapshot(Base):
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
     school_id: Mapped[int] = mapped_column(Integer, nullable=False, index=True)
     rmp_id: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    profile_url: Mapped[str | None] = mapped_column(String(500), nullable=True)
     name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
     department: Mapped[str | None] = mapped_column(String(255), nullable=True, index=True)
     overall_rating: Mapped[float | None] = mapped_column(Float, nullable=True)

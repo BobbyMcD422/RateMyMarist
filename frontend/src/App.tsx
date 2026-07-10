@@ -1,4 +1,4 @@
-import { AlertCircle, DatabaseZap, RefreshCw, Search, ShieldCheck, Star } from "lucide-react"
+import { AlertCircle, DatabaseZap, ExternalLink, RefreshCw, Search, ShieldCheck, Star } from "lucide-react"
 import { FormEvent, useEffect, useMemo, useState } from "react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -291,7 +291,22 @@ function RMPTable({ professors, isLoading }: { professors: RMPProfessor[]; isLoa
       <TableBody>
         {professors.map((professor) => (
           <TableRow key={professor.id}>
-            <TableCell className="font-medium">{professor.name}</TableCell>
+            <TableCell className="font-medium">
+              <div className="flex items-center gap-1">
+                <span>{professor.name}</span>
+                <Button asChild variant="ghost" size="icon" className="size-7 shrink-0">
+                  <a
+                    href={professor.profile_url}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    aria-label={`Open ${professor.name}'s RateMyProfessors profile in a new tab`}
+                    title="Open RateMyProfessors profile"
+                  >
+                    <ExternalLink />
+                  </a>
+                </Button>
+              </div>
+            </TableCell>
             <TableCell className="text-muted-foreground">{professor.department ?? "Unknown"}</TableCell>
             <TableCell>
               <div className="flex items-center gap-1">

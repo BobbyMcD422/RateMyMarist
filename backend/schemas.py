@@ -25,6 +25,7 @@ class SyncResult(BaseModel):
 
 class RMPProfessorOut(BaseModel):
     id: str
+    profile_url: str
     name: str
     department: str | None
     overall_rating: float | None

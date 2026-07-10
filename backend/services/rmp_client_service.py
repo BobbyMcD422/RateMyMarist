@@ -13,6 +13,10 @@ class RMPClientServiceError(RuntimeError):
     pass
 
 
+def get_professor_profile_url(professor_id: str) -> str:
+    return f"https://www.ratemyprofessors.com/professor/{professor_id}"
+
+
 @lru_cache(maxsize=8)
 def _get_all_professors_for_school(school_id: int) -> tuple[RMPProfessorOut, ...]:
     return _fetch_all_professors_for_school(school_id)
@@ -24,6 +28,7 @@ def _fetch_all_professors_for_school(school_id: int) -> tuple[RMPProfessorOut, .
             professors_by_id = {
                 professor.id: RMPProfessorOut(
                     id=professor.id,
+                    profile_url=get_professor_profile_url(professor.id),
                     name=professor.name,
                     department=professor.department,
                     overall_rating=professor.overall_rating,
@@ -56,6 +61,7 @@ def sync_professors_for_school(db: Session, school_id: int) -> RMPSyncResult:
     for professor in professors:
         fetched_ids.add(professor.id)
         values = {
+            "profile_url": professor.profile_url,
             "name": professor.name,
             "department": professor.department,
             "overall_rating": professor.overall_rating,
@@ -156,6 +162,7 @@ def list_saved_professors(
         professors=[
             RMPProfessorOut(
                 id=row.rmp_id,
+                profile_url=row.profile_url or get_professor_profile_url(row.rmp_id),
                 name=row.name,
                 department=row.department,
                 overall_rating=row.overall_rating,
@@ -234,6 +241,7 @@ def list_professors_for_school(
         professors=[
             RMPProfessorOut(
                 id=professor.id,
+                profile_url=get_professor_profile_url(professor.id),
                 name=professor.name,
                 department=professor.department,
                 overall_rating=professor.overall_rating,

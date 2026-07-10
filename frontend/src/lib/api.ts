@@ -27,6 +27,7 @@ export type SyncResult = {
 
 export type RMPProfessor = {
   id: string
+  profile_url: string
   name: string
   department: string | null
   overall_rating: number | null
