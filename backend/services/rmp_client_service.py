@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
 from functools import lru_cache
+from html import unescape
 
 from rmp_client import HttpError, ParsingError, RMPAPIError, RMPClient, RMPError, RetryError
 from sqlalchemy import case, delete, func, select
@@ -7,6 +8,7 @@ from sqlalchemy.orm import Session
 
 from backend.models import RMPProfessorSnapshot
 from backend.schemas import RMPDepartmentOut, RMPProfessorOut, RMPProfessorPageOut, RMPSyncResult
+from backend.services.instructor_matching import suggest_exact_instructor_links
 
 
 class RMPClientServiceError(RuntimeError):
@@ -29,8 +31,8 @@ def _fetch_all_professors_for_school(school_id: int) -> tuple[RMPProfessorOut, .
                 professor.id: RMPProfessorOut(
                     id=professor.id,
                     profile_url=get_professor_profile_url(professor.id),
-                    name=professor.name,
-                    department=professor.department,
+                    name=unescape(professor.name),
+                    department=unescape(professor.department) if professor.department else None,
                     overall_rating=professor.overall_rating,
                     num_ratings=professor.num_ratings,
                     percent_take_again=professor.percent_take_again,
@@ -100,6 +102,8 @@ def sync_professors_for_school(db: Session, school_id: int) -> RMPSyncResult:
             )
         )
 
+    db.flush()
+    suggest_exact_instructor_links(db, school_id)
     db.commit()
     _get_all_professors_for_school.cache_clear()
     return RMPSyncResult(

@@ -25,6 +25,28 @@
   --radius-sm: 0.25rem;
 }
 
+.dark {
+  color-scheme: dark;
+  --color-background: hsl(222 18% 11%);
+  --color-foreground: hsl(210 20% 96%);
+  --color-muted: hsl(220 14% 19%);
+  --color-muted-foreground: hsl(215 14% 68%);
+  --color-popover: hsl(222 17% 14%);
+  --color-popover-foreground: hsl(210 20% 96%);
+  --color-card: hsl(222 17% 14%);
+  --color-card-foreground: hsl(210 20% 96%);
+  --color-border: hsl(217 13% 25%);
+  --color-input: hsl(217 13% 25%);
+  --color-primary: hsl(211 90% 62%);
+  --color-primary-foreground: hsl(222 24% 10%);
+  --color-secondary: hsl(220 14% 20%);
+  --color-secondary-foreground: hsl(210 20% 96%);
+  --color-accent: hsl(220 14% 23%);
+  --color-accent-foreground: hsl(210 20% 96%);
+  --color-destructive: hsl(0 63% 48%);
+  --color-destructive-foreground: hsl(210 20% 98%);
+}
+
 * {
   border-color: var(--color-border);
 }

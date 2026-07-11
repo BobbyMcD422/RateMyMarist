@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel
 
@@ -64,6 +65,9 @@ class SectionInstructorOut(BaseModel):
     display_name: str
     email: str | None
     primary_indicator: bool | None
+    rmp_profile_url: str | None = None
+    rmp_overall_rating: float | None = None
+    rmp_num_ratings: int | None = None
 
 
 class CourseSectionOut(BaseModel):
@@ -95,3 +99,48 @@ class TermOptionOut(BaseModel):
 class CourseDirectoryOptionsOut(BaseModel):
     terms: list[TermOptionOut]
     subjects: list[str]
+
+
+class CourseSummaryOut(BaseModel):
+    id: int
+    subject: str
+    course_number: str
+    title: str
+    term: str
+    section_count: int
+    instructor_count: int
+
+
+class CoursePageOut(BaseModel):
+    total: int
+    limit: int
+    offset: int
+    courses: list[CourseSummaryOut]
+
+
+class CourseDetailOut(BaseModel):
+    id: int
+    subject: str
+    course_number: str
+    title: str
+    term: str
+    term_description: str
+    sections: list[CourseSectionOut]
+
+
+class InstructorRMPLinkOut(BaseModel):
+    instructor_id: int
+    instructor_name: str
+    instructor_email: str | None
+    rmp_professor_id: int
+    rmp_name: str
+    rmp_profile_url: str
+    match_status: str
+    match_confidence: float | None
+    match_method: str
+    reviewed_at: datetime | None
+
+
+class InstructorRMPLinkReview(BaseModel):
+    rmp_professor_id: int
+    match_status: Literal["approved", "rejected", "pending"]

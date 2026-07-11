@@ -1,9 +1,9 @@
 from fastapi import APIRouter, Depends, Query
-from sqlalchemy import exists, func, or_, select
+from sqlalchemy import and_, exists, func, or_, select
 from sqlalchemy.orm import Session
 
 from backend.db import get_db
-from backend.models import AcademicTerm, Course, Instructor, Section, SectionInstructor
+from backend.models import AcademicTerm, Course, Instructor, InstructorRMPLink, RMPProfessorSnapshot, Section, SectionInstructor
 from backend.schemas import (
     CourseDirectoryOptionsOut,
     CourseSectionOut,
@@ -104,12 +104,20 @@ def list_course_sections(
     }
     if section_ids:
         instructor_rows = db.execute(
-            select(SectionInstructor, Instructor)
+            select(SectionInstructor, Instructor, RMPProfessorSnapshot)
             .join(Instructor, Instructor.id == SectionInstructor.instructor_id)
+            .outerjoin(
+                InstructorRMPLink,
+                and_(
+                    InstructorRMPLink.instructor_id == Instructor.id,
+                    InstructorRMPLink.match_status == "approved",
+                ),
+            )
+            .outerjoin(RMPProfessorSnapshot, RMPProfessorSnapshot.id == InstructorRMPLink.rmp_professor_id)
             .where(SectionInstructor.section_id.in_(section_ids))
             .order_by(SectionInstructor.primary_indicator.desc().nullslast(), Instructor.display_name)
         ).all()
-        for assignment, instructor in instructor_rows:
+        for assignment, instructor, professor in instructor_rows:
             instructors_by_section[assignment.section_id].append(
                 SectionInstructorOut(
                     id=instructor.id,
@@ -117,6 +125,9 @@ def list_course_sections(
                     display_name=instructor.display_name,
                     email=instructor.email,
                     primary_indicator=assignment.primary_indicator,
+                    rmp_profile_url=professor.profile_url if professor else None,
+                    rmp_overall_rating=professor.overall_rating if professor else None,
+                    rmp_num_ratings=professor.num_ratings if professor else None,
                 )
             )
 

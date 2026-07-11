@@ -1,4 +1,4 @@
-from datetime import datetime
+from datetime import date, datetime
 
 from sqlalchemy import Boolean, DateTime, Float, ForeignKey, Integer, String, UniqueConstraint, text
 from sqlalchemy.orm import Mapped, mapped_column
@@ -51,6 +51,9 @@ class AcademicTerm(Base):
 
     code: Mapped[str] = mapped_column(String(20), primary_key=True)
     description: Mapped[str] = mapped_column(String(100), nullable=False)
+    starts_at: Mapped[date | None] = mapped_column(nullable=True)
+    ends_at: Mapped[date | None] = mapped_column(nullable=True)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default=text("true"))
     last_synced_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
@@ -61,7 +64,9 @@ class Section(Base):
     )
 
     id: Mapped[int] = mapped_column(primary_key=True, index=True)
-    term: Mapped[str] = mapped_column(String(20), nullable=False, index=True)
+    term: Mapped[str] = mapped_column(
+        ForeignKey("terms.code", ondelete="RESTRICT"), nullable=False, index=True
+    )
     crn: Mapped[str] = mapped_column(String(30), nullable=False, index=True)
     course_id: Mapped[int] = mapped_column(
         ForeignKey("courses.id", ondelete="RESTRICT"),
@@ -88,3 +93,21 @@ class SectionInstructor(Base):
         primary_key=True,
     )
     primary_indicator: Mapped[bool | None] = mapped_column(Boolean, nullable=True)
+
+
+class InstructorRMPLink(Base):
+    __tablename__ = "instructor_rmp_links"
+
+    instructor_id: Mapped[int] = mapped_column(
+        ForeignKey("instructors.id", ondelete="CASCADE"), primary_key=True
+    )
+    rmp_professor_id: Mapped[int] = mapped_column(
+        ForeignKey("rmp_professor_snapshots.id", ondelete="CASCADE"),
+        nullable=False,
+        unique=True,
+        index=True,
+    )
+    match_status: Mapped[str] = mapped_column(String(20), nullable=False, default="pending")
+    match_confidence: Mapped[float | None] = mapped_column(Float, nullable=True)
+    match_method: Mapped[str] = mapped_column(String(30), nullable=False, default="manual")
+    reviewed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)

@@ -3,7 +3,7 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from backend.config import settings
 from backend.db import init_db
-from backend.routers import admin, rmp, sections
+from backend.routers import admin, courses, rmp, sections
 
 
 app = FastAPI(title="Course Directory API")
@@ -29,5 +29,6 @@ def health() -> dict[str, str]:
 
 
 app.include_router(sections.router)
+app.include_router(courses.router)
 app.include_router(admin.router)
 app.include_router(rmp.router)

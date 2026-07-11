@@ -102,6 +102,46 @@ Invoke-RestMethod -Method Post `
 
 The sync upserts courses, instructors, sections, and section-instructor links. Unchanged sections are detected by content hash, and sections missing from a later complete snapshot are marked inactive rather than deleted.
 
+## Program Requirements PDF Probe
+
+Extract a program-requirements PDF into an auditable JSON snapshot without changing the database:
+
+```powershell
+python -m backend.probe_program_requirements_pdf temp/programs-2023-1-.pdf `
+  --output data/program-requirements/programs_2023_extracted.json
+```
+
+Or run it with the backend image while mounting the input and writable output folders:
+
+```powershell
+docker compose run --rm --no-deps `
+  -v "${PWD}/temp:/app/temp:ro" `
+  -v "${PWD}/data:/app/data" `
+  backend python -m backend.probe_program_requirements_pdf
+```
+
+The snapshot preserves raw page text, source locations, detected program headings, course-code occurrences, credits when recognizable, extraction warnings, and a SHA-256 hash of the source PDF. Review it before adding a database import because elective and choice-group language may require additional parsing rules.
+
+## Per-CRN Detail Probe
+
+The standalone CRN probe can evaluate an authenticated MyMarist detail endpoint without writing to Postgres. Configure `MYMARIST_CRN_DETAIL_URL` and the request placement/parameter. It defaults to five sequential requests with a 0.5-second delay. Set `MYMARIST_CRNS` for a targeted list; when it is empty, the probe loads every active CRN for `MYMARIST_CRN_TERM` directly from Postgres in stable CRN order.
+
+Validate the selected batch without using the cookie or sending requests:
+
+```powershell
+docker compose run --rm --no-deps backend `
+  python -m backend.probe_crn_details --crns 12345,12346,12347 --dry-run
+```
+
+Send the first batch, then advance through the same list using the manifest's `next_offset`:
+
+```powershell
+docker compose run --rm --no-deps backend python -m backend.probe_crn_details
+docker compose run --rm --no-deps backend python -m backend.probe_crn_details --offset 5
+```
+
+Each run gets its own timestamped directory under `logs/responses/crn-details/`, with one response file per CRN and a `manifest.json` containing status, size, latency, failures, and the next offset. Batch size is capped at 25 as a guardrail; keep it near five until endpoint behavior and rate limits are understood.
+
 ## Troubleshooting
 
 If FastAPI reports `password authentication failed for user "postgres"`, first restart the API process so it reloads `.env`. The Docker database in this project expects:

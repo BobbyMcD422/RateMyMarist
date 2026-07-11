@@ -6,6 +6,9 @@ export type SectionInstructor = {
   display_name: string
   email: string | null
   primary_indicator: boolean | null
+  rmp_profile_url: string | null
+  rmp_overall_rating: number | null
+  rmp_num_ratings: number | null
 }
 
 export type CourseSection = {
@@ -26,6 +29,33 @@ export type CourseSectionPage = {
   total: number
   limit: number
   offset: number
+  sections: CourseSection[]
+}
+
+export type CourseSummary = {
+  id: number
+  subject: string
+  course_number: string
+  title: string
+  term: string
+  section_count: number
+  instructor_count: number
+}
+
+export type CoursePage = {
+  total: number
+  limit: number
+  offset: number
+  courses: CourseSummary[]
+}
+
+export type CourseDetail = {
+  id: number
+  subject: string
+  course_number: string
+  title: string
+  term: string
+  term_description: string
   sections: CourseSection[]
 }
 
@@ -97,6 +127,19 @@ export type RegistrationSyncResult = {
   synced_at: string
 }
 
+export type InstructorRMPLink = {
+  instructor_id: number
+  instructor_name: string
+  instructor_email: string | null
+  rmp_professor_id: number
+  rmp_name: string
+  rmp_profile_url: string
+  match_status: "pending" | "approved" | "rejected"
+  match_confidence: number | null
+  match_method: string
+  reviewed_at: string | null
+}
+
 async function parseResponse<T>(response: Response): Promise<T> {
   if (response.ok) {
     return response.json() as Promise<T>
@@ -129,6 +172,31 @@ export async function getCourseSections(
 
   const response = await fetch(`${API_BASE_URL}/sections?${params.toString()}`, { signal })
   return parseResponse<CourseSectionPage>(response)
+}
+
+export async function getCourses(
+  query: CourseSectionQuery = {},
+  signal?: AbortSignal,
+): Promise<CoursePage> {
+  const params = new URLSearchParams()
+  params.set("limit", String(query.limit ?? 100))
+  params.set("offset", String(query.offset ?? 0))
+
+  if (query.q) params.set("q", query.q)
+  if (query.term) params.set("term", query.term)
+  if (query.subject && query.subject !== "all") params.set("subject", query.subject)
+
+  const response = await fetch(`${API_BASE_URL}/courses?${params.toString()}`, { signal })
+  return parseResponse<CoursePage>(response)
+}
+
+export async function getCourse(courseId: number, term?: string, signal?: AbortSignal): Promise<CourseDetail> {
+  const params = new URLSearchParams()
+  if (term) params.set("term", term)
+
+  const suffix = params.size ? `?${params.toString()}` : ""
+  const response = await fetch(`${API_BASE_URL}/courses/${courseId}${suffix}`, { signal })
+  return parseResponse<CourseDetail>(response)
 }
 
 export async function getCourseDirectoryOptions(
@@ -210,4 +278,32 @@ export async function syncRegistrationJson(adminToken: string): Promise<Registra
     headers: { "X-Admin-Token": adminToken },
   })
   return parseResponse<RegistrationSyncResult>(response)
+}
+
+export async function getInstructorRMPLinks(
+  adminToken: string,
+  status = "pending",
+): Promise<InstructorRMPLink[]> {
+  const params = new URLSearchParams({ status })
+  const response = await fetch(`${API_BASE_URL}/admin/instructor-rmp-links?${params.toString()}`, {
+    headers: { "X-Admin-Token": adminToken },
+  })
+  return parseResponse<InstructorRMPLink[]>(response)
+}
+
+export async function reviewInstructorRMPLink(
+  adminToken: string,
+  instructorId: number,
+  rmpProfessorId: number,
+  matchStatus: "approved" | "rejected",
+): Promise<InstructorRMPLink> {
+  const response = await fetch(`${API_BASE_URL}/admin/instructor-rmp-links/${instructorId}`, {
+    method: "PUT",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Admin-Token": adminToken,
+    },
+    body: JSON.stringify({ rmp_professor_id: rmpProfessorId, match_status: matchStatus }),
+  })
+  return parseResponse<InstructorRMPLink>(response)
 }

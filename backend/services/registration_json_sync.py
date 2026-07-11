@@ -1,15 +1,18 @@
 import hashlib
 import json
 from datetime import UTC, datetime
+from html import unescape
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import delete, select, tuple_
+from sqlalchemy import delete, select, tuple_, update
 from sqlalchemy.orm import Session
 
 from backend.models import AcademicTerm, Course, Instructor, Section, SectionInstructor
+from backend.config import settings
 from backend.schemas import RegistrationSyncResult
 from backend.services.term_labels import derive_term_description
+from backend.services.instructor_matching import suggest_exact_instructor_links
 
 
 class RegistrationSyncError(RuntimeError):
@@ -20,7 +23,7 @@ def require_text(record: dict[str, Any], key: str, index: int) -> str:
     value = record.get(key)
     if value is None or not str(value).strip():
         raise RegistrationSyncError(f"Section at data[{index}] is missing {key}.")
-    return str(value).strip()
+    return unescape(str(value)).strip()
 
 
 def optional_int(value: Any) -> int | None:
@@ -97,10 +100,12 @@ def sync_registration_json(db: Session, source_path: str) -> RegistrationSyncRes
 
     academic_term = db.get(AcademicTerm, term)
     if academic_term is None:
-        db.add(AcademicTerm(code=term, description=term_description, last_synced_at=synced_at))
+        db.add(AcademicTerm(code=term, description=term_description, is_active=True, last_synced_at=synced_at))
     else:
         academic_term.description = term_description
+        academic_term.is_active = True
         academic_term.last_synced_at = synced_at
+    db.execute(update(AcademicTerm).where(AcademicTerm.code < term).values(is_active=False))
 
     courses_inserted = courses_updated = 0
     instructors_inserted = instructors_updated = 0
@@ -181,7 +186,7 @@ def sync_registration_json(db: Session, source_path: str) -> RegistrationSyncRes
                 links_skipped += 1
                 continue
             banner_id = str(faculty_record.get("bannerId") or "").strip()
-            display_name = str(faculty_record.get("displayName") or "").strip()
+            display_name = unescape(str(faculty_record.get("displayName") or "")).strip()
             if not banner_id or not display_name:
                 links_skipped += 1
                 continue
@@ -246,6 +251,8 @@ def sync_registration_json(db: Session, source_path: str) -> RegistrationSyncRes
         )
         links_deleted = len(stale_link_keys)
 
+    db.flush()
+    suggest_exact_instructor_links(db, settings.rmp_school_id)
     db.commit()
     return RegistrationSyncResult(
         term=term,

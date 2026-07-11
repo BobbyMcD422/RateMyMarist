@@ -4,9 +4,12 @@ __pycache__/
 *.pyc
 node_modules/
 dist/
+program-requirements/
+temp/
 frontend/node_modules/
 frontend/dist/
 logs/*.txt
+logs/*.json
 !logs/.gitkeep
 logs/responses/*
 !logs/responses/.gitkeep
