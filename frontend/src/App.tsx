@@ -702,6 +702,7 @@ const DEFAULT_ROADMAP_TASKS: RoadmapTask[] = [
   { id: "requirements-review", phase: "requirements", title: "Review requirement parsing", detail: "Handle electives, either/or choices, minimum selections, and shared requirements.", completed: false },
   { id: "requirements-db", phase: "requirements", title: "Import catalog requirements", detail: "Add versioned programs, requirement groups, and course associations.", completed: false },
   { id: "professor-compare", phase: "experience", title: "Compare course sections", detail: "Compare every professor, rating, availability, and schedule for one course.", completed: false },
+  { id: "professor-rmp-metrics", phase: "experience", title: "Show RMP metrics in Courses", detail: "Expose the stored Would Take Again percentage and Level of Difficulty alongside overall rating on course section and professor comparison views, with N/A for missing data.", completed: false },
   { id: "degree-progress", phase: "experience", title: "Degree progress workspace", detail: "Let students explore remaining requirements without claiming official advising status.", completed: false },
 ]
 
